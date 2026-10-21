@@ -1,14 +1,21 @@
-# Use a lightweight, production-ready Eclipse Temurin JDK 21 Alpine container
-FROM eclipse-temurin:21-jre-alpine
-
-# Set a secure, dedicated working directory inside the container system
+# STAGE 1: COMPILATION & PACKAGING ENVIRONMENT
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS build_stage
 WORKDIR /app
 
-# Copy the freshly compiled executable binary straight into the execution container
-COPY target/smartresolve-0.0.1-SNAPSHOT.jar app.jar
+# Copy dependency configuration files first to utilize Docker layer caching
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
 
-# Expose port 8080 to the internal Docker network layer
+# Copy source code tree and compile production JAR asset bypassing test loops
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+# STAGE 2: HIGH-PERFORMANCE RUNTIME ENGINE
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+
+# Pull only the compiled executable binary out of the build stage
+COPY --from=build_stage /app/target/smartresolve-*.jar app.jar
+
 EXPOSE 8080
-
-# Execute the application on startup with optimal container performance parameters
 ENTRYPOINT ["java", "-jar", "app.jar"]
