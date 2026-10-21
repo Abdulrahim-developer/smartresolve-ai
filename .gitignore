@@ -1,0 +1,18 @@
+# ==========================================
+# MASTER ROOT DIRECTORY SECURITY BLOCK FILTER
+# ==========================================
+
+# 1. Protect Production Credentials Vault
+.env
+
+# 2. Ignore Local Cache Targets & Builds
+node_modules/
+dist/
+target/
+*.jar
+.elasticbeanstalk/
+
+# 3. System Configuration Profiles
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # 1. PRODUCTION DATA STORAGE ENGINE (POSTGRESQL CLUSTER)
+  postgres-prod:
+    image: postgres:15-alpine
+    container_name: smartresolve_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${PROD_DB_NAME}
+      POSTGRES_USER: ${PROD_DB_USER}
+      POSTGRES_PASSWORD: ${PROD_DB_PASSWORD}
+    volumes:
+      - sr_prod_db_data:/var/lib/postgresql/data
+    networks:
+      - sr-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PROD_DB_USER} -d ${PROD_DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. PRODUCTION HIGH-PERFORMANCE IN-MEMORY DISTRIBUTED CACHE (VALKEY SECURED)
+  valkey-prod:
+    image: valkey/valkey:8.0-alpine
+    container_name: smartresolve_valkey_prod
+    restart: always
+    command: valkey-server --requirepass ${PROD_VALKEY_PASSWORD}
+    networks:
+      - sr-prod-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${PROD_VALKEY_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 3. PRODUCTION JAVA SPRING BOOT API SERVICES ENGINE
+  backend-prod:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartresolve_backend_prod
+    restart: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-prod:5432/${PROD_DB_NAME}
+      - SPRING_DATASOURCE_USERNAME=${PROD_DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${PROD_DB_PASSWORD}
+      - SPRING_DATA_REDIS_HOST=valkey-prod
+      - SPRING_DATA_REDIS_PORT=6379
+      - SPRING_DATA_REDIS_PASSWORD=${PROD_VALKEY_PASSWORD}
+      - SPRING_SQL_INIT_MODE=always
+    depends_on:
+      postgres-prod:
+        condition: service_healthy
+      valkey-prod:
+        condition: service_healthy
+    networks:
+      - sr-prod-network
+
+  # 4. PRODUCTION PUBLIC-FACING WEB SERVER FRONTEND GATEWAY (NGINX)
+  frontend-prod:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smartresolve_frontend_prod
+    restart: always
+    ports:
+      - "80:80" # Restored to standard web port 80 for production deployment!
+    depends_on:
+      - backend-prod
+    networks:
+      - sr-prod-network
+
+volumes:
+  sr_prod_db_data:
+    name: smartresolve_prod_db_data
+    driver: local
+
+networks:
+  sr-prod-network:
+    name: smartresolve_prod_network
+    driver: bridge

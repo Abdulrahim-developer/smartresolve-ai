@@ -1,0 +1,85 @@
+# =====================================================================
+# NOTE: LOCAL DEVELOPMENT & INTEGRATION TESTING MANIFEST ONLY
+# =====================================================================
+# 1. Purposely isolated from frontend containerization to facilitate Vite HMR dev streams.
+# 2. Utilizes non-production baseline credentials exclusively for safe local sandbox validation.
+# 3. For secure cloud staging topologies, see: docker-compose.prod.yml
+# =====================================================================
+
+
+
+version: '3.8'
+
+services:
+  # 1. RELATIONAL DATA STORAGE ENGINE (POSTGRESQL)
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: smartresolve_postgres_local
+    environment:
+      POSTGRES_DB: smartresolvedev
+      POSTGRES_USER: srdev
+      POSTGRES_PASSWORD: collegepass2026
+    ports:
+      - "5433:5432" # Outer host port 5433 routes to internal container port 5432 to bypass Windows pgAdmin clashes
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - sr-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U srdev -d smartresolvedev"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. HIGH-PERFORMANCE IN-MEMORY DISTRIBUTED CACHE (VALKEY)
+  valkey-cache:
+    image: valkey/valkey:8.0-alpine
+    container_name: smartresolve_valkey_local
+    command: valkey-server --requirepass valkeypass2026
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkeydata:/data
+    networks:
+      - sr-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "valkeypass2026", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 3. BACKEND JAVA SPRING BOOT API SERVICE
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartresolve_backend_api
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/smartresolvedev # Connects using internal Docker DNS routing name
+      - SPRING_DATASOURCE_USERNAME=srdev
+      - SPRING_DATASOURCE_PASSWORD=collegepass2026
+      - SPRING_DATA_REDIS_HOST=valkey-cache # Connects using internal cache DNS routing name
+      - SPRING_DATA_REDIS_PORT=6379
+      - SPRING_DATA_REDIS_PASSWORD=valkeypass2026
+      - SPRING_SQL_INIT_MODE=always
+      - SPRING_JPA_DEFER-DATASOURCE-INITIALIZATION=true
+    depends_on:
+      postgres-db:
+        condition: service_healthy # Guarantees database is fully online before booting application jar
+      valkey-cache:
+        condition: service_healthy
+    networks:
+      - sr-network
+
+networks:
+  sr-network:
+    name: smartresolve-ai_sr-network
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: smartresolve-ai_pgdata
+  valkeydata:
+    name: smartresolve-ai_valkeydata
